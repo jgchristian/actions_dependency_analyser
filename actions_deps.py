@@ -1,39 +1,38 @@
 #!/usr/bin/env python3
-import os
-import sys
-import base64
+"""
+GitHub Actions Dependency Analyzer
+Analyzes workflows and actions to show their nested dependencies.
+"""
 import argparse
+import base64
+import os
 import subprocess
+import sys
 from pathlib import Path
-from typing import Dict, Set, List, Any, Tuple, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 import yaml
 
 # --------- CONFIG ---------
 
+
 def get_github_token() -> Optional[str]:
     """Get GitHub token from environment or gh CLI."""
-    token = os.getenv("GITHUB_TOKEN")
-    if token:
+    if token := os.getenv("GITHUB_TOKEN"):
         return token
-    
-    # Try to get token from gh CLI
+
     try:
         result = subprocess.run(
-            ["gh", "auth", "token"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["gh", "auth", "token"], capture_output=True, text=True, timeout=5
         )
-        if result.returncode == 0:
-            token = result.stdout.strip()
-            if token:
-                return token
+        if result.returncode == 0 and (token := result.stdout.strip()):
+            return token
     except (subprocess.SubprocessError, FileNotFoundError):
         pass
-    
+
     return None
+
 
 GITHUB_TOKEN = get_github_token()
 GITHUB_API_URL = "https://api.github.com"
@@ -42,11 +41,10 @@ GITHUB_API_URL = "https://api.github.com"
 
 local_yaml_cache: Dict[Path, Any] = {}
 remote_yaml_cache: Dict[Tuple[str, str, str, str], Any] = {}
-
-# visited keys: "local:/abs/path" or "remote:owner/repo:path@ref"
 VisitedKey = str
 
 # --------- LOCAL FILE HELPERS ---------
+
 
 def load_local_yaml(path: Path) -> Any:
     if path in local_yaml_cache:
@@ -56,27 +54,31 @@ def load_local_yaml(path: Path) -> Any:
     local_yaml_cache[path] = data
     return data
 
+
 def find_all_workflows(repo_root: Path) -> List[Path]:
     workflows_dir = repo_root / ".github" / "workflows"
     if not workflows_dir.exists():
         return []
     return sorted(p for p in workflows_dir.glob("*.y*ml") if p.is_file())
 
+
 def find_all_local_actions(repo_root: Path) -> List[Path]:
     """Find all local action.yml/action.yaml files in .github/actions/"""
     actions_dir = repo_root / ".github" / "actions"
     if not actions_dir.exists():
         return []
-    
+
     action_files = []
     for action_yml in actions_dir.rglob("action.y*ml"):
         if action_yml.is_file():
             action_files.append(action_yml)
     return sorted(action_files)
 
+
 def is_local_path(uses: str) -> bool:
     # e.g. "./.github/actions/foo", ".github/workflows/bar.yml"
     return uses.startswith("./") or uses.startswith(".github/")
+
 
 def resolve_local_path(uses: str, repo_root: Path) -> Path:
     """
@@ -87,7 +89,7 @@ def resolve_local_path(uses: str, repo_root: Path) -> Path:
         raw = uses[2:]
     else:
         raw = uses
-    
+
     candidate = repo_root / raw
 
     if candidate.is_dir():
@@ -102,7 +104,9 @@ def resolve_local_path(uses: str, repo_root: Path) -> Path:
 
     raise FileNotFoundError(f"Cannot resolve local uses path: {uses} -> {candidate}")
 
+
 # --------- REMOTE FILE HELPERS ---------
+
 
 def parse_remote_uses(uses: str) -> Optional[Tuple[str, str, str, str]]:
     """
@@ -126,7 +130,10 @@ def parse_remote_uses(uses: str) -> Optional[Tuple[str, str, str, str]]:
 
     return owner, repo, path, ref
 
-def github_api_get(url: str, *, params: Dict[str, str] = None) -> requests.Response:
+
+def github_api_get(
+    url: str, *, params: Optional[Dict[str, str]] = None
+) -> requests.Response:
     headers = {
         "Accept": "application/vnd.github.v3+json",
     }
@@ -135,6 +142,7 @@ def github_api_get(url: str, *, params: Dict[str, str] = None) -> requests.Respo
     resp = requests.get(url, headers=headers, params=params or {})
     resp.raise_for_status()
     return resp
+
 
 def load_remote_yaml(owner: str, repo: str, path: str, ref: str) -> Tuple[str, Any]:
     """
@@ -187,7 +195,9 @@ def load_remote_yaml(owner: str, repo: str, path: str, ref: str) -> Tuple[str, A
         f"last error: {last_err}"
     )
 
+
 # --------- COMMON YAML PARSING ---------
+
 
 def extract_uses_from_steps(steps: List[Dict[str, Any]]) -> List[str]:
     uses_refs: List[str] = []
@@ -197,6 +207,7 @@ def extract_uses_from_steps(steps: List[Dict[str, Any]]) -> List[str]:
         if isinstance(step, dict) and "uses" in step:
             uses_refs.append(step["uses"])
     return uses_refs
+
 
 def extract_uses_from_workflow(doc: Dict[str, Any]) -> List[str]:
     uses_refs: List[str] = []
@@ -214,10 +225,12 @@ def extract_uses_from_workflow(doc: Dict[str, Any]) -> List[str]:
         uses_refs.extend(extract_uses_from_steps(steps))
     return uses_refs
 
+
 def extract_uses_from_action(doc: Dict[str, Any]) -> List[str]:
     runs = doc.get("runs", {}) or {}
     steps = runs.get("steps", [])
     return extract_uses_from_steps(steps)
+
 
 def classify_doc(doc: Any, *, path_hint: Optional[str] = None) -> str:
     """
@@ -243,6 +256,7 @@ def classify_doc(doc: Any, *, path_hint: Optional[str] = None) -> str:
 
     return "unknown"
 
+
 def extract_uses_from_local(path: Path) -> List[str]:
     doc = load_local_yaml(path) or {}
     kind = classify_doc(doc, path_hint=str(path))
@@ -252,6 +266,7 @@ def extract_uses_from_local(path: Path) -> List[str]:
         return extract_uses_from_action(doc)
     else:
         return []
+
 
 def extract_uses_from_remote(owner: str, repo: str, path: str, ref: str) -> List[str]:
     resolved_path, doc = load_remote_yaml(owner, repo, path, ref)
@@ -263,9 +278,13 @@ def extract_uses_from_remote(owner: str, repo: str, path: str, ref: str) -> List
     else:
         return []
 
+
 # --------- TREE PRINTING ---------
 
-def print_tree_local(path: Path, repo_root: Path, prefix: str, visited: Set[VisitedKey]) -> None:
+
+def print_tree_local(
+    path: Path, repo_root: Path, prefix: str, visited: Set[VisitedKey]
+) -> None:
     key: VisitedKey = f"local:{path}"
     if key in visited:
         print(f"{prefix}↳ [CYCLE] {path.relative_to(repo_root)}")
@@ -293,6 +312,7 @@ def print_tree_local(path: Path, repo_root: Path, prefix: str, visited: Set[Visi
             owner, repo, rpath, ref = remote
             print_tree_remote(owner, repo, rpath, ref, prefix + "    ", visited)
 
+
 def print_tree_remote(
     owner: str,
     repo: str,
@@ -311,7 +331,7 @@ def print_tree_remote(
     # Try to fetch YAML and classify/extract uses
     try:
         resolved_path, doc = load_remote_yaml(owner, repo, path, ref)
-    except Exception as e:
+    except Exception:
         # Silently skip - likely a JS/Docker action without nested dependencies
         return
 
@@ -348,7 +368,9 @@ def print_tree_remote(
             o2, r2, p2, ref2 = remote2
             print_tree_remote(o2, r2, p2, ref2, prefix + "    ", visited)
 
+
 # --------- MAIN ---------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -358,29 +380,32 @@ def main() -> None:
         "repo_path",
         nargs="?",
         default=".",
-        help="Path to repository root (containing .github folder). Defaults to current directory."
+        help="Path to repository root (containing .github folder). Defaults to current directory.",
     )
     args = parser.parse_args()
 
     repo_root = Path(args.repo_path).resolve()
-    
+
     if not repo_root.exists():
         print(f"Error: Path does not exist: {repo_root}")
         sys.exit(1)
-    
+
     if not repo_root.is_dir():
         print(f"Error: Path is not a directory: {repo_root}")
         sys.exit(1)
 
     workflows = find_all_workflows(repo_root)
     local_actions = find_all_local_actions(repo_root)
-    
+
     if not workflows and not local_actions:
         print(f"No workflows or actions found under {repo_root / '.github'}")
         sys.exit(0)
 
     if not GITHUB_TOKEN:
-        print("NOTE: GITHUB_TOKEN not set. You may hit rate limits or be unable to read private repos.\n")
+        print(
+            "NOTE: GITHUB_TOKEN not set. "
+            "You may hit rate limits or be unable to read private repos.\n"
+        )
 
     print(f"Repo root: {repo_root}")
     print("Workflows and their nested action dependencies (local + remote):\n")
@@ -391,17 +416,16 @@ def main() -> None:
         visited: Set[VisitedKey] = set()
         print_tree_local(wf, repo_root, prefix="  ", visited=visited)
         print()
-    
+
     if local_actions:
         print("\nLocal actions (not necessarily referenced):\n")
         for action in local_actions:
-            rel = action.relative_to(repo_root)
             action_dir = action.parent.relative_to(repo_root)
             print(f"=== {action_dir} ===")
-            visited: Set[VisitedKey] = set()
-            print_tree_local(action, repo_root, prefix="  ", visited=visited)
+            action_visited: Set[VisitedKey] = set()
+            print_tree_local(action, repo_root, prefix="  ", visited=action_visited)
             print()
+
 
 if __name__ == "__main__":
     main()
-

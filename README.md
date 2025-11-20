@@ -5,96 +5,105 @@ A Python tool to analyze GitHub Actions workflows and their nested action depend
 ## Features
 
 - 📊 Analyzes all workflows in `.github/workflows/`
+- 📁 Discovers all local actions in `.github/actions/` (even if not referenced)
 - 🔍 Follows nested dependencies in composite actions
 - 🌐 Fetches and analyzes remote actions from GitHub
 - 🔄 Detects dependency cycles
-- 🔐 Supports GitHub token authentication (via environment variable or `gh` CLI)
-- 📁 Can analyze any repository by specifying a path
+- 🔐 Auto-detects GitHub token (from environment or `gh` CLI)
+- 📂 Can analyze any repository by path
 
 ## Installation
 
-1. Install dependencies:
 ```bash
 pip install requests pyyaml
 ```
 
-Or use a virtual environment:
+Or with a virtual environment:
+
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install requests pyyaml
 ```
 
 ## Usage
 
-### Basic usage (current directory)
 ```bash
+# Analyze current directory
 python actions_deps.py
-```
 
-### Analyze a specific repository
-```bash
+# Analyze specific repository
 python actions_deps.py /path/to/repo
-```
 
-### With test samples
-```bash
+# Analyze test samples
 python actions_deps.py test
-```
 
-### Help
-```bash
+# Show help
 python actions_deps.py --help
 ```
 
 ## Authentication
 
-The script will automatically use authentication in this order:
+Auto-detects in order:
+
 1. `GITHUB_TOKEN` environment variable
-2. `gh auth token` (if GitHub CLI is installed and authenticated)
-3. Unauthenticated (with rate limits)
+2. `gh auth token` (if GitHub CLI installed)
+3. Unauthenticated (rate limited)
 
-To set a token manually:
-```bash
-export GITHUB_TOKEN='your_github_token'
-```
+Manual setup:
 
-Or authenticate with GitHub CLI:
 ```bash
+export GITHUB_TOKEN='your_token'
+# or
 gh auth login
 ```
 
 ## Example Output
 
-```
+```text
 Repo root: /path/to/repo
 Workflows and their nested action dependencies (local + remote):
 
 === .github/workflows/build.yaml ===
   ↳ actions/checkout@abc123
-  ↳ actions/setup-python@def456
-  ↳ pre-commit/action@ghi789
+  ↳ actions/setup-python@v5
+  ↳ pre-commit/action@def456
       ↳ actions/cache@v4
   ↳ ./.github/actions/my-action
       ↳ actions/checkout@abc123
           ↳ [CYCLE] actions/checkout:@abc123
-      ↳ actions/setup-node@jkl012
+
+Local actions (not necessarily referenced):
+
+=== .github/actions/my-action ===
+  ↳ actions/checkout@abc123
+  ↳ actions/setup-node@ghi789
 ```
 
-## Understanding the Output
+## Output Explained
 
-- `↳` indicates a direct dependency
-- Indented `↳` shows nested dependencies (e.g., actions used by composite actions)
-- `[CYCLE]` indicates a dependency that was already analyzed (prevents infinite loops)
-- Local actions (starting with `./`) are followed to show their dependencies
+- `↳` - Direct dependency
+- Indented `↳` - Nested dependency (used by composite actions)
+- `[CYCLE]` - Already analyzed (prevents infinite loops)
+- Local actions starting with `./` are followed recursively
 
 ## Test Samples
 
 The `test/` directory contains sample workflows demonstrating:
-- Remote actions (from GitHub marketplace)
-- Local composite actions (`.github/actions/`)
+
+- Remote actions from GitHub Marketplace
+- Local composite actions
 - Nested dependencies
-- Reusable workflows
+- Dependency cycles
+
+## Use Case
+
+This tool helps identify hidden dependencies in GitHub Actions, particularly useful when:
+
+- Your organization restricts actions to specific SHAs
+- You need to audit all action dependencies
+- Composite actions use unpinned or unapproved actions
+- You want to discover all actions in a repository
 
 ## License
 
